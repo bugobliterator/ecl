@@ -168,6 +168,11 @@ bool Ekf::update()
 		_fuse_vert_vel = true;
 		_fuse_hor_vel = true;
 
+	} else if(_flow_buffer.pop_first_older_than(_imu_sample_delayed.time_us, &_flow_sample_delayed) && _control_status.flags.opt_flow) {
+		_fuse_pos = false;
+		_fuse_vert_vel = false;
+		_fuse_hor_vel = false;
+		_fuse_flow = true;
 	} else if (!_control_status.flags.gps && !_control_status.flags.opt_flow
 		   && ((_time_last_imu - _time_last_fake_gps > 2e5) || _fuse_height)) {
 		_fuse_pos = true;
@@ -176,6 +181,9 @@ bool Ekf::update()
 		_time_last_fake_gps = _time_last_imu;
 	}
 
+	if (_fuse_flow) {
+		fuseOptFlow();
+	}
 	if (_fuse_height || _fuse_pos || _fuse_hor_vel || _fuse_vert_vel) {
 		fuseVelPosHeight();
 		_fuse_hor_vel = _fuse_vert_vel = _fuse_pos = _fuse_height = false;

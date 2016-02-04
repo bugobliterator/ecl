@@ -47,22 +47,28 @@ void Ekf::controlFusionModes()
 	calculateVehicleStatus();
 
 	// optical flow fusion mode selection logic
-	_control_status.flags.opt_flow = false;
+	if(_params.fusion_mode == PV_AID_OF) {
+		// decide when to start using optical flow data
+		if (!_control_status.flags.opt_flow) {
+			if (_control_status.flags.angle_align && (_time_last_imu - _time_last_optflow) < 5e5) {
+				_control_status.flags.opt_flow = true;
+				_control_status.flags.gps = false;
+				//use flow if present and 
+				resetPosition();
+				resetVelocity();
+			}
+		}
+	}
 
 	// GPS fusion mode selection logic
 	// To start use GPS we need angular alignment completed, the local NED origin set and fresh GPS data
-	if (!_control_status.flags.gps) {
+	if (!_control_status.flags.gps && !_control_status.flags.opt_flow) {
 		if (_control_status.flags.angle_align && (_time_last_imu - _time_last_gps) < 5e5 && _NED_origin_initialised
 		    && (_time_last_imu - _last_gps_fail_us > 5e6)) {
 			_control_status.flags.gps = true;
 			resetPosition();
 			resetVelocity();
 		}
-	}
-
-	// decide when to start using optical flow data
-	if (!_control_status.flags.opt_flow) {
-		// TODO optical flow start logic
 	}
 
 	// handle the case when we are relying on GPS fusion and lose it

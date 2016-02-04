@@ -98,7 +98,7 @@ public:
 
 	virtual bool collect_range(uint64_t time_usec, float *data) { return true; }
 
-	virtual bool collect_opticalflow(uint64_t time_usec, float *data) { return true; }
+	virtual bool collect_opticalflow(uint64_t time_usec, Vector2f *flowdata, Vector2f *gyrodata) { return true; }
 
 	// set delta angle imu data
 	void setIMUData(uint64_t time_usec, uint64_t delta_ang_dt, uint64_t delta_vel_dt, float *delta_ang, float *delta_vel);
@@ -119,7 +119,7 @@ public:
 	void setRangeData(uint64_t time_usec, float *data);
 
 	// set optical flow data
-	void setOpticalFlowData(uint64_t time_usec, float *data);
+	void setOpticalFlowData(uint64_t time_usec, Vector2f *flowdata, Vector2f *gyrodata);
 
 	// return a address to the parameters struct
 	// in order to give access to the application
@@ -220,7 +220,7 @@ protected:
 	uint64_t _time_last_baro;
 	uint64_t _time_last_range;
 	uint64_t _time_last_airspeed;
-
+	uint64_t _time_last_optflow;
 
 	fault_status_t _fault_status;
 	bool initialise_interface(uint64_t timestamp);

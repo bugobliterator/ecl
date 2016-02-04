@@ -111,11 +111,21 @@ struct flowSample {
 	uint64_t    time_us;
 };
 
+enum fusion_mode {
+	PV_AID_GPS,
+	PV_AID_OF,
+	PV_AID_GPS_OF,
+	PV_AID_NONE
+};
+
 struct parameters {
+	int fusion_mode = PV_AID_GPS;
+
 	float mag_delay_ms = 0.0f;
 	float baro_delay_ms = 0.0f;
 	float gps_delay_ms = 200.0f;
 	float airspeed_delay_ms = 200.0f;
+	float flow_delay_ms = 0.0f;
 
 	// input noise
 	float gyro_noise = 0.001f;
