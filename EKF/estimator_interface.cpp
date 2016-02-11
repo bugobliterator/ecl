@@ -130,14 +130,13 @@ void EstimatorInterface::setGpsData(uint64_t time_usec, struct gps_message *gps)
 		gps_sample_new.time_us = gps->time_usec - _params.gps_delay_ms * 1000;
 
 		gps_sample_new.time_us -= FILTER_UPDATE_PERRIOD_MS * 1000 / 2;
-		_time_last_gps = time_usec;
 
+		_time_last_gps = time_usec;
 		gps_sample_new.time_us = math::max(gps_sample_new.time_us, _imu_sample_delayed.time_us);
 
 		memcpy(gps_sample_new.vel._data[0], gps->vel_ned, sizeof(gps_sample_new.vel._data));
 
 		_gps_speed_valid = gps->vel_ned_valid;
-
 		float lpos_x = 0.0f;
 		float lpos_y = 0.0f;
 		map_projection_project(&_pos_ref, (gps->lat / 1.0e7), (gps->lon / 1.0e7), &lpos_x, &lpos_y);
@@ -194,22 +193,35 @@ void EstimatorInterface::setRangeData(uint64_t time_usec, float *data)
 	if (!collect_range(time_usec, data) || !_initialised) {
 		return;
 	}
+	if (time_usec > _time_last_range) {
+		rangeSample range_sample_new;
+		range_sample_new.rng = *data;
+		range_sample_new.time_us -= _params.range_delay_ms * 1000;
+
+		range_sample_new.time_us = time_usec;
+		_time_last_range = time_usec;
+
+		_range_buffer.push(range_sample_new);
+	}
 }
 
 // set optical flow data
-void EstimatorInterface::setOpticalFlowData(uint64_t time_usec, Vector2f *flowdata, Vector2f *gyrodata)
+void EstimatorInterface::setOpticalFlowData(uint64_t time_usec, uint8_t quality, Vector2f *flowdata, Vector2f *gyrodata, uint32_t dt)
 {
-	if (!collect_opticalflow(time_usec, flowdata, gyrodata) || !_initialised) {
+	if (!collect_opticalflow(time_usec, quality, flowdata, gyrodata, dt) || !_initialised) {
 		return;
 	}
+
 	if(time_usec > _time_last_optflow) {
 		flowSample optflow_sample_new;
-		optflow_sample_new.time_us = time_usec - _params.flow_delay_ms * 1000;
-		optflow_sample_new.flowRadXY = *flowdata;
+		optflow_sample_new.time_us = time_usec - _params.flow_delay_ms * 1000 - dt/2;
+		optflow_sample_new.quality = quality;
+		optflow_sample_new.flowRadXY = -1e6f*(*flowdata);
 		//TODO: proper filtering of gyro data, and option to select if use gyro onboard, probably part of measurement(H) matrix
-		optflow_sample_new.flowRadXYcomp = *flowdata - *gyrodata;
+		optflow_sample_new.flowRadXYcomp = (-(*flowdata) + *gyrodata);
 		_time_last_optflow = time_usec;
 		_flow_buffer.push(optflow_sample_new);
+		//printOF(&optflow_sample_new);
 	}
 }
 
@@ -268,11 +280,18 @@ void EstimatorInterface::unallocate_buffers()
 
 }
 
-bool EstimatorInterface::position_is_valid()
+bool EstimatorInterface::global_position_is_valid()
 {
 	// return true if the position estimate is valid
 	// TOTO implement proper check based on published GPS accuracy, innovaton consistency checks and timeout status
-	return _NED_origin_initialised && (_time_last_imu - _time_last_gps) < 5e6;
+	return (_NED_origin_initialised && (_time_last_imu - _time_last_gps) < 5e6);
+}
+
+bool EstimatorInterface::local_position_is_valid()
+{
+	// return true if the position estimate is valid
+	// TOTO implement proper check based on published GPS accuracy, innovaton consistency checks and timeout status
+	return _healthy_optical_flow;
 }
 
 void EstimatorInterface::printStoredIMU()
@@ -286,7 +305,7 @@ void EstimatorInterface::printStoredIMU()
 
 void EstimatorInterface::printIMU(struct imuSample *data)
 {
-	printf("time %" PRIu64 "\n", data->time_us);
+	printf("time %lld\n", data->time_us);
 	printf("delta_ang_dt %.5f\n", (double)data->delta_ang_dt);
 	printf("delta_vel_dt %.5f\n", (double)data->delta_vel_dt);
 	printf("dA: %.5f %.5f %.5f \n", (double)data->delta_ang(0), (double)data->delta_ang(1), (double)data->delta_ang(2));
@@ -323,6 +342,21 @@ void EstimatorInterface::printBaro(struct baroSample *data)
 {
 	printf("time %" PRIu64 "\n", data->time_us);
 	printf("baro: %.5f\n\n", (double)data->hgt);
+}
+
+void EstimatorInterface::printOF(struct flowSample *data)
+{
+	printf("time %" PRIu64 "\n", data->time_us);
+	printf("quality: %d flow: %.8f %.8f\n\n",data->quality, (double)(data->flowRadXYcomp)(0), (double)(data->flowRadXYcomp)(1));
+}
+
+void EstimatorInterface::printStoredOF()
+{
+	printf("---------Printing OF data buffer------------\n");
+
+	for (int i = 0; i < OBS_BUFFER_LENGTH; i++) {
+		printOF(&_flow_buffer[i]);
+	}
 }
 
 void EstimatorInterface::printStoredBaro()

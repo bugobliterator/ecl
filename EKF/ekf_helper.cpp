@@ -77,8 +77,15 @@ void Ekf::resetPosition()
 		// XXX use the value of the last known position
 	}
 
-	baroSample baro_newest = _baro_buffer.get_newest();
-	_state.pos(2) = -baro_newest.hgt;
+
+	if (_params.vdist_sensor_type == VDIST_SENSOR_RANGE) {
+		rangeSample range_init = _range_buffer.get_newest();
+		_state.pos(2) = -range_init.rng;
+	} else {
+		// initialize vertical position with newest baro measurement
+		baroSample baro_init = _baro_buffer.get_newest();
+		_state.pos(2) = -baro_init.hgt;
+	}
 }
 
 #if defined(__PX4_POSIX) && !defined(__PX4_QURT)

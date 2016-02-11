@@ -40,6 +40,7 @@
  */
 
 #include "ekf.h"
+#include <mathlib/mathlib.h>
 
 void Ekf::fuseVelPosHeight()
 {
@@ -76,13 +77,25 @@ void Ekf::fuseVelPosHeight()
         gate_size[3] = fmaxf(_params.posNE_innov_gate, 1.0f);
         gate_size[4] = gate_size[3];
 	}
-
+	bool use_rng_height = _fuse_range_data;
+	bool use_baro_height = !use_rng_height;
 	if (_fuse_height) {
-		fuse_map[5] = true;
-		_vel_pos_innov[5] = _state.pos(2) - (-_baro_sample_delayed.hgt);		// baro measurement has inversed z axis
-		R[5] = _params.baro_noise;
-        gate_size[5] = fmaxf(_params.baro_innov_gate, 1.0f);
-    }
+		if(use_baro_height) {
+			printf("I am here!!\n");
+			fuse_map[5] = true;
+			_vel_pos_innov[5] = _state.pos(2) - (-_baro_sample_delayed.hgt);		// baro measurement has inversed z axis
+			R[5] = _params.baro_noise;
+	        gate_size[5] = fmaxf(_params.baro_innov_gate, 1.0f);
+	    } else if(use_rng_height) {
+	    	fuse_map[5] = true;
+    		matrix::Dcm<float> earth_to_body(_state.quat_nominal);	//convert quat to DCM
+			earth_to_body = earth_to_body.transpose();	// calculate earth to body rot mat
+			_vel_pos_innov[5] = _state.pos(2) - (-math::max(_range_sample_delayed.rng*earth_to_body(2,2),0.1f));		// baro measurement has inversed z axis
+			R[5] = _params.range_noise;
+	        gate_size[5] = fmaxf(_params.range_innov_gate, 1.0f);
+	        //printf("I am at %.9f but ekf says I am at %.9f\n", (double)(_range_sample_delayed.rng*earth_to_body(2,2)), (double)_state.pos(2));
+	    }
+	}
 
     // calculate innovation test ratios
     for (unsigned obs_index = 0; obs_index < 6; obs_index++) {
@@ -94,7 +107,7 @@ void Ekf::fuseVelPosHeight()
             _vel_pos_test_ratio[obs_index] = sq(_vel_pos_innov[obs_index]) / (sq(gate_size[obs_index]) * _vel_pos_innov[obs_index]);
         }
     }
-
+    //printf("%d %d %d\n", _fuse_pos, _fuse_hor_vel, _fuse_vert_vel, _fuse_height);
     // check position, velocity and height innovations
     // treat 3D velocity, 2D position and height as separate sensors
     // always pass position checks if using synthetic position measurements
@@ -125,16 +138,15 @@ void Ekf::fuseVelPosHeight()
         if (!fuse_map[obs_index] || !innov_check_pass_map[obs_index]) {
 			continue;
 		}
-
 		unsigned state_index = obs_index + 3;	// we start with vx and this is the 4. state
 
         // calculate kalman gain K = PHS, where S = 1/innovation variance
 		for (int row = 0; row < 24; row++) {
             Kfusion[row] = P[row][state_index] / _vel_pos_innov_var[obs_index];
 		}
-
 		// by definition the angle error state is zero at the fusion time
 		_state.ang_error.setZero();
+
 
 		// fuse the observation
 		fuse(Kfusion, _vel_pos_innov[obs_index]);

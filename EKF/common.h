@@ -106,30 +106,40 @@ struct airspeedSample {
 };
 
 struct flowSample {
+	uint8_t quality;
 	Vector2f    flowRadXY;
 	Vector2f    flowRadXYcomp;
 	uint64_t    time_us;
 };
 
-enum fusion_mode {
+enum fusion_mode_t {
 	PV_AID_GPS,
 	PV_AID_OF,
 	PV_AID_GPS_OF,
 	PV_AID_NONE
 };
 
-struct parameters {
-	int fusion_mode = PV_AID_GPS;
+enum vdist_sensor_type_t {
+	VDIST_SENSOR_RANGE,
+	VDIST_SENSOR_BARO,
+	VDIST_SENSOR_GPS,
+	VDIST_SENSOR_NONE
+};
 
+struct parameters {
+	int fusion_mode = PV_AID_OF;
+	int vdist_sensor_type = VDIST_SENSOR_RANGE;
+	float rng_gnd_clearance = 0.1f;
 	float mag_delay_ms = 0.0f;
 	float baro_delay_ms = 0.0f;
 	float gps_delay_ms = 200.0f;
 	float airspeed_delay_ms = 200.0f;
-	float flow_delay_ms = 0.0f;
-
+	float flow_delay_ms = 10.0f;
+	float range_delay_ms = 0.0f;
 	// input noise
 	float gyro_noise = 0.001f;
 	float accel_noise = 0.1f;
+	float flow_noise = 0.001f;
 
 	// process noise
 	float gyro_bias_p_noise = 1e-5f;
@@ -141,15 +151,17 @@ struct parameters {
 	float gps_vel_noise = 0.05f;
 	float gps_pos_noise = 1.0f;
 	float baro_noise = 0.1f;
+	float range_noise = 0.01f;
 	float baro_innov_gate = 5.0f;       // barometric height innovation consistency gate size in standard deviations
 	float posNE_innov_gate = 5.0f;      // GPS horizontal position innovation consistency gate size in standard deviations
 	float vel_innov_gate = 3.0f;        // GPS velocity innovation consistency gate size in standard deviations
+	float range_innov_gate = 3.0f;
 
 	float mag_heading_noise = 3e-2f;	// measurement noise used for simple heading fusion
 	float mag_declination_deg = 0.0f;	// magnetic declination in degrees
 	float heading_innov_gate = 3.0f;	// heading fusion innovation consistency gate size in standard deviations
 	float mag_innov_gate = 3.0f;        // magnetometer fusion innovation consistency gate size in standard deviations
-
+	float flow_innov_gate = 3.0f;
 	// these parameters control the strictness of GPS quality checks used to determine uf the GPS is
 	// good enough to set a local origin and commence aiding
 	int gps_check_mask = 21;    // bitmask used to control which GPS quality checks are used

@@ -83,6 +83,7 @@ public:
 	// ask estimator for sensor data collection decision and do any preprocessing if required, returns true if not defined
 	bool collect_gps(uint64_t time_usec, struct gps_message *gps);
 	bool collect_imu(imuSample &imu);
+	bool collect_opticalflow(uint64_t time_usec, uint8_t quality, Vector2f *flowdata, Vector2f *gyrodata, uint32_t dt);
 
 	filter_control_status_u _control_status = {};
 
@@ -142,6 +143,7 @@ private:
 	float _gps_velN_filt = 0.0f;  // GPS filtered North velocity (m/s)
 	float _gps_velE_filt = 0.0f;   // GPS filtered East velocity (m/s)
 	uint64_t _last_gps_fail_us = 0;   // last system time in usec that the GPS failed it's checks
+	bool _fuse_range_data;
 
 	// Variables used to publish the WGS-84 location of the EKF local NED origin
 	uint64_t _last_gps_origin_time_us = 0;              // time the origin was last set (uSec)

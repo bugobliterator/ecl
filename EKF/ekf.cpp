@@ -119,7 +119,6 @@ bool Ekf::init(uint64_t timestamp)
 bool Ekf::update()
 {
 	bool ret = false;	// indicates if there has been an update
-
 	if (!_filter_initialised) {
 		_filter_initialised = initialiseFilter();
 
@@ -128,8 +127,8 @@ bool Ekf::update()
 		}
 	}
 
-	//printStates();
-	//printStatesFast();
+	printStatesFast();
+	//printStoredBaro();
 	// prediction
 	if (_imu_updated) {
 		ret = true;
@@ -146,7 +145,6 @@ bool Ekf::update()
 	if (_mag_buffer.pop_first_older_than(_imu_sample_delayed.time_us, &_mag_sample_delayed)) {
 		if (_control_status.flags.mag_3D && _control_status.flags.angle_align) {
 			fuseMag();
-
 			if (_control_status.flags.mag_dec) {
 				// TODO need to fuse synthetic declination measurements if there is no GPS or equivalent aiding
 				// otherwise heading will slowly drift
@@ -156,41 +154,43 @@ bool Ekf::update()
 		}
 	}
 
-	if (_baro_buffer.pop_first_older_than(_imu_sample_delayed.time_us, &_baro_sample_delayed)) {
+	if (_range_buffer.pop_first_older_than(_imu_sample_delayed.time_us, &_range_sample_delayed)) {
+		_fuse_range_data = true;
+		_fuse_height = true;
+	} else if (_baro_buffer.pop_first_older_than(_imu_sample_delayed.time_us, &_baro_sample_delayed) && _params.vdist_sensor_type == VDIST_SENSOR_BARO) {
 		_fuse_height = true;
 	}
 
 	// If we are using GPS aiding and data has fallen behind the fusion time horizon then fuse it
 	// if we aren't doing any aiding, fake GPS measurements at the last known position to constrain drift
 	// Coincide fake measurements with baro data for efficiency with a minimum fusion rate of 5Hz
-	if (_gps_buffer.pop_first_older_than(_imu_sample_delayed.time_us, &_gps_sample_delayed) && _control_status.flags.gps) {
-		_fuse_pos = true;
-		_fuse_vert_vel = true;
-		_fuse_hor_vel = true;
-
-	} else if(_flow_buffer.pop_first_older_than(_imu_sample_delayed.time_us, &_flow_sample_delayed) && _control_status.flags.opt_flow) {
+	//if (_gps_buffer.pop_first_older_than(_imu_sample_delayed.time_us, &_gps_sample_delayed) && _control_status.flags.gps) {
+	//	_fuse_pos = true;
+	//	_fuse_vert_vel = true;
+	//	_fuse_hor_vel = true;
+	//	_fuse_flow = false;
+	if(_flow_buffer.pop_first_older_than(_imu_sample_delayed.time_us, &_flow_sample_delayed) && _control_status.flags.opt_flow) {
 		_fuse_pos = false;
 		_fuse_vert_vel = false;
 		_fuse_hor_vel = false;
+		
 		_fuse_flow = true;
-	} else if (!_control_status.flags.gps && !_control_status.flags.opt_flow
-		   && ((_time_last_imu - _time_last_fake_gps > 2e5) || _fuse_height)) {
-		_fuse_pos = true;
-		_gps_sample_delayed.pos(0) = _last_known_posNE(0);
-		_gps_sample_delayed.pos(1) = _last_known_posNE(1);
-		_time_last_fake_gps = _time_last_imu;
-	}
-
-	if (_fuse_flow) {
-		fuseOptFlow();
-	}
+	}// else if (!_control_status.flags.gps && !_control_status.flags.opt_flow
+	//	   && ((_time_last_imu - _time_last_fake_gps > 2e5) || _fuse_height)) {
+	//	_fuse_pos = true;
+	//	_gps_sample_delayed.pos(0) = _last_known_posNE(0);
+	//	_gps_sample_delayed.pos(1) = _last_known_posNE(1);
+	//	_time_last_fake_gps = _time_last_imu;
+	//}
+	
 	if (_fuse_height || _fuse_pos || _fuse_hor_vel || _fuse_vert_vel) {
 		fuseVelPosHeight();
 		_fuse_hor_vel = _fuse_vert_vel = _fuse_pos = _fuse_height = false;
 	}
 
-	if (_range_buffer.pop_first_older_than(_imu_sample_delayed.time_us, &_range_sample_delayed)) {
-		fuseRange();
+	if (_fuse_flow) {
+		fuseOptFlow();
+		_fuse_flow = false;
 	}
 
 	if (_airspeed_buffer.pop_first_older_than(_imu_sample_delayed.time_us, &_airspeed_sample_delayed)) {
@@ -258,16 +258,22 @@ bool Ekf::initialiseFilter(void)
 	resetVelocity();
 	resetPosition();
 
-	// initialize vertical position with newest baro measurement
-	baroSample baro_init = _baro_buffer.get_newest();
-
-	if (baro_init.time_us == 0) {
-		return false;
+	if (_params.vdist_sensor_type == VDIST_SENSOR_RANGE) {
+		rangeSample range_init = _range_buffer.get_newest();
+		_state.pos(2) = range_init.rng;
+		_output_new.pos(2) = -range_init.rng;
+		if (range_init.time_us == 0) {
+			return false;
+		}
+	} else {
+		// initialize vertical position with newest baro measurement
+		baroSample baro_init = _baro_buffer.get_newest();
+		_state.pos(2) = -baro_init.hgt;
+		_output_new.pos(2) = -baro_init.hgt;
+		if (baro_init.time_us == 0) {
+			return false;
+		}
 	}
-
-	_state.pos(2) = -baro_init.hgt;
-	_output_new.pos(2) = -baro_init.hgt;
-
 	initialiseCovariance();
 
 	return true;
@@ -359,6 +365,32 @@ bool Ekf::collect_imu(imuSample &imu)
 	return false;
 }
 
+bool Ekf::collect_opticalflow(uint64_t time_usec, uint8_t quality, Vector2f *flowdata, Vector2f *gyrodata, uint32_t dt)
+{
+	if(quality <= 150 || fabsf(_state.pos(2)) < 0.2f) {
+		(*flowdata)(0) = 0.0f;
+        (*flowdata)(1) = 0.0f;
+        (*gyrodata)(0) = 0.0f;
+        (*gyrodata)(1) = 0.0f;
+	}else {
+		//matrix::Euler<float> euler(_state.quat_nominal);
+		float integralToRate = 1e6f/dt;
+		/*float cosYaw = cosf(euler(0));
+		float sinYaw = sinf(euler(0));
+		Vector2f gyro = *gyrodata,flow = *flowdata;
+		(*flowdata)(0) = 1.0f * integralToRate * (cosYaw * float(flow(0)) - sinYaw * float(flow(1))); // rad/sec measured optically about the X body axis
+        (*flowdata)(1) = 1.0f * integralToRate * (sinYaw * float(flow(0)) + cosYaw * float(flow(1))); // rad/sec measured optically about the Y body axis
+        (*gyrodata)(0) = integralToRate * (cosYaw * float(gyro(0)) - sinYaw * float(gyro(1))); // rad/sec measured inertially about the X body axis
+        (*gyrodata)(1) = integralToRate * (sinYaw * float(gyro(0)) + cosYaw * float(gyro(1))); // rad/sec measured inertially about the Y body axis
+		*/
+		(*flowdata)(0) *= integralToRate;
+		(*flowdata)(1) *= integralToRate;
+		(*gyrodata)(0) *= integralToRate;
+		(*gyrodata)(1) *= integralToRate;
+		
+	}
+	return true;
+}
 void Ekf::calculateOutputStates()
 {
 	imuSample imu_new = _imu_sample_new;
@@ -490,7 +522,7 @@ void Ekf::printStatesFast()
 {
 	static int counter_fast = 0;
 
-	if (counter_fast % 50 == 0) {
+	if (counter_fast % 200 == 0) {
 		printf("quaternion\n");
 
 		for (int i = 0; i < 4; i++) {

@@ -56,6 +56,7 @@ void Ekf::controlFusionModes()
 				//use flow if present and 
 				resetPosition();
 				resetVelocity();
+				_healthy_optical_flow = false;
 			}
 		}
 	}
@@ -72,7 +73,7 @@ void Ekf::controlFusionModes()
 	}
 
 	// handle the case when we are relying on GPS fusion and lose it
-	if (_control_status.flags.gps && !_control_status.flags.opt_flow) {
+	if (_control_status.flags.gps) {
 		// We are relying on GPS aiding to constrain attitude drift so after 10 seconds without aiding we need to do something
 		if ((_time_last_imu - _time_last_pos_fuse > 10e6) && (_time_last_imu - _time_last_vel_fuse > 10e6)) {
 			if (_time_last_imu - _time_last_gps > 5e5) {
@@ -82,7 +83,6 @@ void Ekf::controlFusionModes()
 				_last_known_posNE(0) = _state.pos(0);
 				_last_known_posNE(1) = _state.pos(1);
 				_state.vel.setZero();
-
 			} else {
 				// Reset states to the last GPS measurement
 				resetPosition();
@@ -93,7 +93,22 @@ void Ekf::controlFusionModes()
 
 	// handle the case when we are relying on optical flow fusion and lose it
 	if (_control_status.flags.opt_flow && !_control_status.flags.gps) {
-		// TODO
+		// We are relying on flow aiding to constrain attitude drift so after 400ms without aiding we need to do something
+		if ((_time_last_imu - _time_last_of_fuse > 4e5)) {
+			if (_time_last_imu - _time_last_optflow > 2e5) {
+				// if we don't have gps then we need to switch to the non-aiding mode, zero the veloity states
+				// and set the synthetic position to the current estimate
+				_control_status.flags.opt_flow = false;
+				_last_known_posNE(0) = _state.pos(0);
+				_last_known_posNE(1) = _state.pos(1);
+				_state.vel.setZero();
+			} else {
+				// Reset states to the last measurement
+				resetPosition();
+				resetVelocity();
+			}
+			_healthy_optical_flow = false;
+		}
 	}
 
 	// Determine if we should use simple magnetic heading fusion which works better when there are large external disturbances

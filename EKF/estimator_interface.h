@@ -98,7 +98,7 @@ public:
 
 	virtual bool collect_range(uint64_t time_usec, float *data) { return true; }
 
-	virtual bool collect_opticalflow(uint64_t time_usec, Vector2f *flowdata, Vector2f *gyrodata) { return true; }
+	virtual bool collect_opticalflow(uint64_t time_usec, uint8_t quality, Vector2f *flowdata, Vector2f *gyrodata, uint32_t dt) { return true; }
 
 	// set delta angle imu data
 	void setIMUData(uint64_t time_usec, uint64_t delta_ang_dt, uint64_t delta_vel_dt, float *delta_ang, float *delta_vel);
@@ -119,7 +119,7 @@ public:
 	void setRangeData(uint64_t time_usec, float *data);
 
 	// set optical flow data
-	void setOpticalFlowData(uint64_t time_usec, Vector2f *flowdata, Vector2f *gyrodata);
+	void setOpticalFlowData(uint64_t time_usec,uint8_t quality, Vector2f *flowdata, Vector2f *gyrodata, uint32_t dt);
 
 	// return a address to the parameters struct
 	// in order to give access to the application
@@ -136,10 +136,12 @@ public:
 	void printStoredMag();
 	void printBaro(struct baroSample *data);
 	void printStoredBaro();
+	void printOF(struct flowSample *data);
 	void printGps(struct gpsSample *data);
 	void printStoredGps();
-
-	bool position_is_valid();
+	void printStoredOF();
+	bool global_position_is_valid();
+	bool local_position_is_valid();
 
 
 	void copy_quaternion(float *quat)
@@ -169,7 +171,7 @@ protected:
 
 	parameters _params;		// filter parameters
 
-	static const uint8_t OBS_BUFFER_LENGTH = 10;
+	static const uint8_t OBS_BUFFER_LENGTH = 30;
 	static const uint8_t IMU_BUFFER_LENGTH = 30;
 	static const unsigned FILTER_UPDATE_PERRIOD_MS = 10;
 
@@ -198,6 +200,7 @@ protected:
 	bool _NED_origin_initialised = false;
 	bool _gps_speed_valid = false;
 	struct map_projection_reference_s _pos_ref = {};    // Contains WGS-84 position latitude and longitude (radians)
+	bool _healthy_optical_flow = false;
 
 	bool _mag_healthy = false;		// computed by mag innovation test
 	float _yaw_test_ratio;          // yaw innovation consistency check ratio
